@@ -13,7 +13,7 @@ from detectron2.structures import BitMasks
 
 from .dino_decoder import TransformerDecoder, DeformableTransformerDecoderLayer
 from ...utils.utils import MLP, gen_encoder_output_proposals, inverse_sigmoid
-from ...utils import box_ops
+from ...utils.box_ops import masks_to_boxes, box_xyxy_to_cxcywh
 
 
 TRANSFORMER_DECODER_REGISTRY = Registry("TRANSFORMER_MODULE")
@@ -386,10 +386,10 @@ class MaskDINODecoder(nn.Module):
                 if self.initialize_box_type == 'bitmask':  # slower, but more accurate
                     refpoint_embed = BitMasks(flaten_mask > 0).get_bounding_boxes().tensor.cuda()
                 elif self.initialize_box_type == 'mask2box':  # faster conversion
-                    refpoint_embed = box_ops.masks_to_boxes(flaten_mask > 0).cuda()
+                    refpoint_embed = masks_to_boxes(flaten_mask > 0).cuda()
                 else:
                     assert NotImplementedError
-                refpoint_embed = box_ops.box_xyxy_to_cxcywh(refpoint_embed) / torch.as_tensor([w, h, w, h],
+                refpoint_embed = box_xyxy_to_cxcywh(refpoint_embed) / torch.as_tensor([w, h, w, h],
                                                                                               dtype=torch.float).cuda()
                 refpoint_embed = refpoint_embed.reshape(outputs_mask.shape[0], outputs_mask.shape[1], 4)
                 refpoint_embed = inverse_sigmoid(refpoint_embed)

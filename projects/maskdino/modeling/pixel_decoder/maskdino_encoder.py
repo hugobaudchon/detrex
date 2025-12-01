@@ -15,6 +15,9 @@ from detectron2.config import configurable
 from detectron2.layers import Conv2d, ShapeSpec, get_norm
 from detectron2.modeling import SEM_SEG_HEADS_REGISTRY
 
+if "MaskDINOEncoder" in SEM_SEG_HEADS_REGISTRY._obj_map:        # fix double import issue
+    del SEM_SEG_HEADS_REGISTRY._obj_map["MaskDINOEncoder"]
+
 from .position_encoding import PositionEmbeddingSine
 from ...utils.utils import _get_clones, _get_activation_fn
 # from .ops.modules import MSDeformAttn

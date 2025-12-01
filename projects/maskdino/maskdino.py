@@ -16,7 +16,7 @@ from detectron2.utils.memory import retry_if_cuda_oom
 
 from .modeling.criterion import SetCriterion
 from .modeling.matcher import HungarianMatcher
-from .utils import box_ops
+from .utils.box_ops import generalized_box_iou, box_cxcywh_to_xyxy, box_xyxy_to_cxcywh
 
 
 @META_ARCH_REGISTRY.register()
@@ -244,7 +244,7 @@ class MaskDINO(nn.Module):
                 {
                     "labels": targets_per_image.gt_classes,
                     "masks": padded_masks,
-                    "boxes":box_ops.box_xyxy_to_cxcywh(targets_per_image.gt_boxes.tensor)/image_size_xyxy
+                    "boxes": box_xyxy_to_cxcywh(targets_per_image.gt_boxes.tensor)/image_size_xyxy
                 }
             )
         return new_targets
@@ -265,7 +265,7 @@ class MaskDINO(nn.Module):
                 {
                     "labels": targets_per_image.gt_classes,
                     "masks": padded_masks,
-                    "boxes": box_ops.box_xyxy_to_cxcywh(targets_per_image.gt_boxes.tensor) / image_size_xyxy
+                    "boxes": box_xyxy_to_cxcywh(targets_per_image.gt_boxes.tensor) / image_size_xyxy
                 }
             )
         return new_targets
@@ -391,7 +391,7 @@ class MaskDINO(nn.Module):
 
     def box_postprocess(self, out_bbox, img_h, img_w):
         # postprocess box height and width
-        boxes = box_ops.box_cxcywh_to_xyxy(out_bbox)
+        boxes = box_cxcywh_to_xyxy(out_bbox)
         scale_fct = torch.tensor([img_w, img_h, img_w, img_h])
         scale_fct = scale_fct.to(out_bbox)
         boxes = boxes * scale_fct
