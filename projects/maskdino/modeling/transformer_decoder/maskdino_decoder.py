@@ -149,12 +149,12 @@ class MaskDINODecoder(nn.Module):
                                           )
 
         self.hidden_dim = hidden_dim
-        _bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
+        self._bbox_embed = _bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         nn.init.constant_(_bbox_embed.layers[-1].weight.data, 0)
         nn.init.constant_(_bbox_embed.layers[-1].bias.data, 0)
         box_embed_layerlist = [_bbox_embed for i in range(self.num_layers)]  # share box prediction each layer
-        bbox_embed = nn.ModuleList(box_embed_layerlist)
-        self.decoder.bbox_embed = bbox_embed
+        self.bbox_embed = nn.ModuleList(box_embed_layerlist)
+        self.decoder.bbox_embed = self.bbox_embed
 
     def prepare_for_dn(self, targets, tgt, refpoint_emb, batch_size):
         if self.training:
