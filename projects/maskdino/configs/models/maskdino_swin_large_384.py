@@ -18,6 +18,7 @@ model.backbone = L(SwinTransformer)(
     num_heads=(6, 12, 24, 48),
     window_size=12,
     out_indices=(0, 1, 2, 3),
+    use_checkpoint = True,                 # Added for gradient checkpointing to save memory
 )
 
 # modify neck config

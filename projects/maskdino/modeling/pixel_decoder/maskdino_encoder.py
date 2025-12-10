@@ -10,6 +10,7 @@ from torch import nn
 from torch.nn import functional as F
 from torch.nn.init import xavier_uniform_, constant_, uniform_, normal_
 from torch.cuda.amp import autocast
+from torch.utils.checkpoint import checkpoint
 
 from detectron2.config import configurable
 from detectron2.layers import Conv2d, ShapeSpec, get_norm
@@ -41,7 +42,7 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
     def __init__(self, d_model=256, nhead=8,
                  num_encoder_layers=6, dim_feedforward=1024, dropout=0.1,
                  activation="relu",
-                 num_feature_levels=4, enc_n_points=4,):
+                 num_feature_levels=4, enc_n_points=4, use_checkpoint: bool = False):
         super().__init__()
 
         self.d_model = d_model
@@ -50,7 +51,7 @@ class MSDeformAttnTransformerEncoderOnly(nn.Module):
         encoder_layer = MSDeformAttnTransformerEncoderLayer(d_model, dim_feedforward,
                                                             dropout, activation,
                                                             num_feature_levels, nhead, enc_n_points)
-        self.encoder = MSDeformAttnTransformerEncoder(encoder_layer, num_encoder_layers)
+        self.encoder = MSDeformAttnTransformerEncoder(encoder_layer, num_encoder_layers, use_checkpoint=use_checkpoint)
 
         self.level_embed = nn.Parameter(torch.Tensor(num_feature_levels, d_model))
 
@@ -158,10 +159,11 @@ class MSDeformAttnTransformerEncoderLayer(nn.Module):
 
 
 class MSDeformAttnTransformerEncoder(nn.Module):
-    def __init__(self, encoder_layer, num_layers):
+    def __init__(self, encoder_layer, num_layers, use_checkpoint: bool = False):
         super().__init__()
         self.layers = _get_clones(encoder_layer, num_layers)
         self.num_layers = num_layers
+        self.use_checkpoint = use_checkpoint
 
     @staticmethod
     def get_reference_points(spatial_shapes, valid_ratios, device):
@@ -182,7 +184,42 @@ class MSDeformAttnTransformerEncoder(nn.Module):
         output = src
         reference_points = self.get_reference_points(spatial_shapes, valid_ratios, device=src.device)
         for _, layer in enumerate(self.layers):
-            output = layer(output, pos, reference_points, spatial_shapes, level_start_index, padding_mask)
+            def layer_forward(
+                output_tokens,
+                pos_embed,
+                ref_points,
+                shapes,
+                start_index,
+                pad_mask,
+            ):
+                return layer(
+                    output_tokens,
+                    pos_embed,
+                    ref_points,
+                    shapes,
+                    start_index,
+                    pad_mask,
+                )
+
+            if self.use_checkpoint and self.training:
+                output = checkpoint(
+                    layer_forward,
+                    output,
+                    pos,
+                    reference_points,
+                    spatial_shapes,
+                    level_start_index,
+                    padding_mask,
+                )
+            else:
+                output = layer_forward(
+                    output,
+                    pos,
+                    reference_points,
+                    spatial_shapes,
+                    level_start_index,
+                    padding_mask,
+                )
 
         return output
 
@@ -210,6 +247,7 @@ class MaskDINOEncoder(nn.Module):
         num_feature_levels: int,
         total_num_feature_levels: int,
         feature_order: str,
+        use_checkpoint: bool = False,
     ):
         """
         NOTE: this interface is experimental.
@@ -286,6 +324,7 @@ class MaskDINOEncoder(nn.Module):
             dim_feedforward=transformer_dim_feedforward,
             num_encoder_layers=transformer_enc_layers,
             num_feature_levels=self.total_num_feature_levels,
+            use_checkpoint=use_checkpoint,
         )
         N_steps = conv_dim // 2
         self.pe_layer = PositionEmbeddingSine(N_steps, normalize=True)
@@ -338,7 +377,7 @@ class MaskDINOEncoder(nn.Module):
         self.lateral_convs = lateral_convs[::-1]
         self.output_convs = output_convs[::-1]
 
-    @autocast(enabled=False)
+    # @autocast(enabled=False)
     def forward_features(self, features, masks):
         srcsl = []
         srcs = []
@@ -403,4 +442,3 @@ class MaskDINOEncoder(nn.Module):
                 num_cur_levels += 1
         # import ipdb; ipdb.set_trace()
         return self.mask_features(out[-1]), out[0], multi_scale_features
-

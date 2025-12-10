@@ -7,6 +7,7 @@ from typing import Optional, List, Union
 import torch
 from torch import nn, Tensor
 from torch.cuda.amp import autocast
+from torch.utils.checkpoint import checkpoint
 
 from ...utils.utils import MLP, _get_clones, _get_activation_fn, gen_sineembed_for_position, inverse_sigmoid
 from detrex.layers import MultiScaleDeformableAttention
@@ -25,6 +26,7 @@ class TransformerDecoder(nn.Module):
                  rm_dec_query_scale=True,
                  dec_layer_share=False,
                  dec_layer_dropout_prob=None,
+                 use_checkpoint: bool = False,
                  ):
         super().__init__()
         if num_layers > 0:
@@ -56,6 +58,7 @@ class TransformerDecoder(nn.Module):
         self.d_model = d_model
         self.modulate_hw_attn = modulate_hw_attn
         self.deformable_decoder = deformable_decoder
+        self.use_checkpoint = use_checkpoint
 
         if not deformable_decoder and modulate_hw_attn:
             self.ref_anchor_head = MLP(d_model, d_model, 2, 2)
@@ -128,22 +131,68 @@ class TransformerDecoder(nn.Module):
             pos_scale = self.query_scale(output) if self.query_scale is not None else 1
             query_pos = pos_scale * raw_query_pos
 
-            output = layer(
-                tgt=output,
-                tgt_query_pos=query_pos,
-                tgt_query_sine_embed=query_sine_embed,
-                tgt_key_padding_mask=tgt_key_padding_mask,
-                tgt_reference_points=reference_points_input,
+            def layer_forward(
+                tgt,
+                tgt_query_pos,
+                tgt_query_sine_embed,
+                tgt_key_padding_mask,
+                tgt_reference_points,
+                memory_in,
+                memory_key_padding_mask_in,
+                memory_level_start_index_in,
+                memory_spatial_shapes_in,
+                memory_pos_in,
+                self_attn_mask_in,
+                cross_attn_mask_in,
+            ):
+                return layer(
+                    tgt=tgt,
+                    tgt_query_pos=tgt_query_pos,
+                    tgt_query_sine_embed=tgt_query_sine_embed,
+                    tgt_key_padding_mask=tgt_key_padding_mask,
+                    tgt_reference_points=tgt_reference_points,
 
-                memory=memory,
-                memory_key_padding_mask=memory_key_padding_mask,
-                memory_level_start_index=level_start_index,
-                memory_spatial_shapes=spatial_shapes,
-                memory_pos=pos,
+                    memory=memory_in,
+                    memory_key_padding_mask=memory_key_padding_mask_in,
+                    memory_level_start_index=memory_level_start_index_in,
+                    memory_spatial_shapes=memory_spatial_shapes_in,
+                    memory_pos=memory_pos_in,
 
-                self_attn_mask=tgt_mask,
-                cross_attn_mask=memory_mask
-            )
+                    self_attn_mask=self_attn_mask_in,
+                    cross_attn_mask=cross_attn_mask_in
+                )
+
+            if self.use_checkpoint and self.training:
+                output = checkpoint(
+                    layer_forward,
+                    output,
+                    query_pos,
+                    query_sine_embed,
+                    tgt_key_padding_mask,
+                    reference_points_input,
+                    memory,
+                    memory_key_padding_mask,
+                    level_start_index,
+                    spatial_shapes,
+                    pos,
+                    tgt_mask,
+                    memory_mask,
+                )
+            else:
+                output = layer_forward(
+                    output,
+                    query_pos,
+                    query_sine_embed,
+                    tgt_key_padding_mask,
+                    reference_points_input,
+                    memory,
+                    memory_key_padding_mask,
+                    level_start_index,
+                    spatial_shapes,
+                    pos,
+                    tgt_mask,
+                    memory_mask,
+                )
 
             # iter update
             if self.bbox_embed is not None:
@@ -165,7 +214,6 @@ class TransformerDecoder(nn.Module):
 
 
 class DeformableTransformerDecoderLayer(nn.Module):
-
     def __init__(self, d_model=256, d_ffn=1024,
                  dropout=0.1, activation="relu",
                  n_levels=4, n_heads=8, n_points=4,
@@ -216,7 +264,7 @@ class DeformableTransformerDecoderLayer(nn.Module):
         tgt = self.norm3(tgt)
         return tgt
 
-    @autocast(enabled=False)
+    # @autocast(enabled=False)
     def forward(self,
                 # for tgt
                 tgt: Optional[Tensor],  # nq, bs, d_model

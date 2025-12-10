@@ -66,6 +66,7 @@ model = L(MaskDINO)(
             num_feature_levels=3,
             total_num_feature_levels=4,
             feature_order='low2high',
+            use_checkpoint = True,                 # Added for gradient checkpointing to save memory
         ),
         loss_weight= 1.0,
         ignore_value= -1,
@@ -96,6 +97,7 @@ model = L(MaskDINO)(
             query_dim= "${...params.query_dim}",
             dec_layer_share = False,
             semantic_ce_loss = False,
+            use_checkpoint = True,                 # Added for gradient checkpointing to save memory
         ),
     ),
     criterion=L(WeightedCriterion)(

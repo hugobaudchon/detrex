@@ -62,6 +62,7 @@ class MaskDINODecoder(nn.Module):
             query_dim: int = 4,
             dec_layer_share: bool = False,
             semantic_ce_loss: bool = False,
+            use_checkpoint: bool = False,
     ):
         """
         NOTE: this interface is experimental.
@@ -88,6 +89,7 @@ class MaskDINODecoder(nn.Module):
             return_intermediate_dec: return the intermediate results of decoder
             query_dim: 4 -> (x, y, w, h)
             dec_layer_share: whether to share each decoder layer
+            use_checkpoint: whether to use gradient checkpointing to save memory
         """
         super().__init__()
 
@@ -146,6 +148,7 @@ class MaskDINODecoder(nn.Module):
                                           d_model=hidden_dim, query_dim=query_dim,
                                           num_feature_levels=self.num_feature_levels,
                                           dec_layer_share=dec_layer_share,
+                                          use_checkpoint=use_checkpoint
                                           )
 
         self.hidden_dim = hidden_dim
